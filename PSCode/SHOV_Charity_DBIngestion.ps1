@@ -67,7 +67,7 @@ Function Write-Log {
     }
 } 
 
-function Test-SQLConnection{    
+Function Test-SQLConnection{    
     [OutputType([bool])]
     Param
     (
@@ -98,7 +98,7 @@ function Test-SQLConnection{
     }
 }
 
-function Invoke-UdfSQLQuery{ 
+Function Invoke-UdfSQLQuery{ 
  [CmdletBinding()]
         param (
               [string] $ConnectionString,   # ConnectionString
@@ -138,7 +138,7 @@ function Invoke-UdfSQLQuery{
   
 }
 
-function Invoke-UdfUpdateQuery{ 
+Function Invoke-UdfUpdateQuery{ 
  [CmdletBinding()]
         param (
               [string] $ConnectionString,   # ConnectionString
@@ -174,6 +174,36 @@ function Invoke-UdfUpdateQuery{
     }
   
 }
+Function Get-udfToken{
+ [CmdletBinding()]
+        param (
+              [string] $EndPoint,
+              [string] $clientID,
+              [string] $clientSecret
+          )
+####### Token Generation ########
+
+#$EndPoint = -join ($config.APIBaseURL, $c.APITokenGeneration)
+$Method = "GET"
+$ContentType = "application/json"
+#$clientID = $config.clientID
+#$clientSecret = $config.clientSecret
+
+$params = @{
+    Uri         = $EndPoint
+    Method      = $Method
+    ContentType = $ContentType
+    Headers     = @{ 
+                    'clientId' = "$clientID"  
+                    'clientSecret' = "$clientSecret" 
+                    }
+}
+    $rToken = Invoke-RestMethod @params 
+    return $rToken.token
+
+####### Token Generation ########
+}
+
 #endregion Function definitions
 
 #region Reading Config file
@@ -290,51 +320,68 @@ if ($isErrorExit)
 
 #region Code for Token Generation
 ####### Token Generation ########
-
-$EndPoint = -join ($config.APIBaseURL, $c.APITokenGeneration)
-$Method = "GET"
-$ContentType = "application/json"
-$clientID = $config.clientID
-$clientSecret = $config.clientSecret
-
-$params = @{
-    Uri         = $EndPoint
-    Method      = $Method
-    ContentType = $ContentType
-    Headers     = @{ 
-                    'clientId' = "$clientID"  
-                    'clientSecret' = "$clientSecret" 
-                    }
-}
-
-try{
-    Write-Log -Level INFO -Message "Calling Token generation API" -logfile $LogFileName
-    $token = $null
-    $rToken = Invoke-RestMethod @params 
-    $token = $rToken.token
-    if ($token)
-    {
-        Write-Log -Level INFO -Message "Token generated successfully" -logfile $LogFileName    
-    }
-}
-catch
-{
-#    Write-Host "StatusCode:" $_.Exception.Response.StatusCode.value__ 
-#    Write-Host "StatusDescription:" $_.Exception.Response.StatusDescription    
-    
-    Write-Log -Level ERROR -Message "Error during Token Generation API call." -logfile $LogFileName -ErrorAction Stop
-    Write-Log -Level ERROR -Message $_.Exception.Message -logfile $LogFileName -ErrorAction Stop
-    if ($_.Exception.Response.StatusCode.value__ )
-    {
-        Write-Log -Level INFO -Message ("StatusCode:" + $_.Exception.Response.StatusCode.value__ ) -logfile $LogFileName -ErrorAction Stop
-        Write-Log -Level INFO -Message ("StatusCode:" + $_.Exception.Response.StatusDescription) -logfile $LogFileName -ErrorAction Stop
-    }
-}
+#
+#$EndPoint = -join ($config.APIBaseURL, $c.APITokenGeneration)
+#$Method = "GET"
+#$ContentType = "application/json"
+#$clientID = $config.clientID
+#$clientSecret = $config.clientSecret
+#
+#$params = @{
+#    Uri         = $EndPoint
+#    Method      = $Method
+#    ContentType = $ContentType
+#    Headers     = @{ 
+#                    'clientId' = "$clientID"  
+#                    'clientSecret' = "$clientSecret" 
+#                    }
+#}
+#
+#try{
+#    Write-Log -Level INFO -Message "Calling Token generation API" -logfile $LogFileName
+#    $token = $null
+#    $rToken = Invoke-RestMethod @params 
+#    $token = $rToken.token
+#    if ($token)
+#    {
+#        Write-Log -Level INFO -Message "Token generated successfully" -logfile $LogFileName    
+#    }
+#}
+#catch
+#{
+##    Write-Host "StatusCode:" $_.Exception.Response.StatusCode.value__ 
+##    Write-Host "StatusDescription:" $_.Exception.Response.StatusDescription    
+#    
+#    Write-Log -Level ERROR -Message "Error during Token Generation API call." -logfile $LogFileName -ErrorAction Stop
+#    Write-Log -Level ERROR -Message $_.Exception.Message -logfile $LogFileName -ErrorAction Stop
+#    if ($_.Exception.Response.StatusCode.value__ )
+#    {
+#        Write-Log -Level INFO -Message ("StatusCode:" + $_.Exception.Response.StatusCode.value__ ) -logfile $LogFileName -ErrorAction Stop
+#        Write-Log -Level INFO -Message ("StatusCode:" + $_.Exception.Response.StatusDescription) -logfile $LogFileName -ErrorAction Stop
+#    }
+#}
 
 ####### Token Generation ########
 #endregion code for Token Generation
 
 #region Code for GetWorkList
+
+$token = $null
+Write-Log -Level INFO -Message "Calling Token generation API" -logfile $LogFileName
+try
+{
+    $token = Get-udfToken -EndPoint (-join ($config.APIBaseURL, $c.APITokenGeneration)) -clientID $config.clientID -clientSecret $config.clientSecret -ErrorAction Stop
+}
+catch
+{
+    $token = $null
+    Write-Log -Level ERROR -Message "Error during Token Generation API call." -logfile $LogFileName -ErrorAction Stop
+    Write-Log -Level ERROR -Message $_.Exception.Message -logfile $LogFileName -ErrorAction Stop
+    Write-Log -Level ERROR -Message $_.ErrorDetails.Message -logfile $LogFileName -ErrorAction Stop
+    Write-Host "Bot Execution Stopped."
+    Exit
+}
+
 
 foreach ($RequestType in $config.RequestTypes.Split(","))
 {
@@ -374,20 +421,128 @@ foreach ($RequestType in $config.RequestTypes.Split(","))
 #        $_.Exception.Message
 
         Write-Log -Level ERROR -Message "Error during Get Worklist API call." -logfile $LogFileName -ErrorAction Stop
-        Write-Log -Level ERROR -Message $_.Exception.Message -logfile $LogFileName -ErrorAction Stop
         if ($_.Exception.Response.StatusCode.value__ )
         {
             Write-Log -Level INFO -Message ("StatusCode:" + $_.Exception.Response.StatusCode.value__ ) -logfile $LogFileName -ErrorAction Stop
             Write-Log -Level INFO -Message ("StatusCode:" + $_.Exception.Response.StatusDescription) -logfile $LogFileName -ErrorAction Stop
         }
+        Write-Log -Level ERROR -Message $_.Exception.Message -logfile $LogFileName -ErrorAction Stop
+        Write-Log -Level ERROR -Message $_.ErrorDetails.Message -logfile $LogFileName -ErrorAction Stop
     
     }
 
-             [string]$GetWorkListSP = -JOIN ("EXEC ", $config.GetWorkListSP, "@json = ", $WorkListjson )
-             Invoke-UdfUpdateQuery -ConnectionString $config.PSDBConnectionString -sqlquery $GetWorkListSP | Out-Null
+             [string]$InsertWorkListSP = -JOIN ("EXEC ", $config.InsertWorkListSP, "@json = ", $WorkListjson )
+             Invoke-UdfUpdateQuery -ConnectionString $config.PSDBConnectionString -sqlquery $InsertWorkListSP | Out-Null
 }
 #endregion Code for GetWorkList
 
 #region Checkout Account
+Write-Log -Level INFO -Message "Calling Token generation API" -logfile $LogFileName
+try
+{
+    $token = Get-udfToken -EndPoint (-join ($config.APIBaseURL, $c.APITokenGeneration)) -clientID $config.clientID -clientSecret $config.clientSecret -ErrorAction Stop
+}
+catch
+{
+    $token = $null
+    Write-Log -Level ERROR -Message "Error during Token Generation API call." -logfile $LogFileName -ErrorAction Stop
+    Write-Log -Level ERROR -Message $_.Exception.Message -logfile $LogFileName -ErrorAction Stop
+    Write-Log -Level ERROR -Message $_.ErrorDetails.Message -logfile $LogFileName -ErrorAction Stop
+    Write-Host "Bot Execution Stopped."
+    Exit
+}
+
+
+    [string]$GetWorkListSP = -JOIN ("EXEC ", $config.GetWorkListSP, "@json = ", $WorkListjson )
+    $WorkListData = Invoke-UdfSQLQuery -ConnectionString $config.PSDBConnectionString -sqlquery $GetWorkListSP; 
+
+    if($WorkListData.Success -eq $true)
+    {
+
+        if ($WorkListData.DataSet.Tables[0].Rows.Count -gt 0)
+        {
+            foreach ($WorkListItem in $WorkListData.DataSet.Tables[0].Rows)
+            {
+            $AccountNo = $WorkListItem.AccountNo
+            $reqType = $WorkListItem.RequestType
+                $jsonbody = @"
+{
+  "focus": {
+    "type": "Account",
+    "display": "$reqType",
+    "identifier": {
+      "type": "AccountNumber",
+      "value": "$AccountNo"
+    }
+  },
+  "performer": {
+    "type": "user",
+    "code": "12312"
+  }
+}
+"@
+                
+                $EndPoint = -join ($config.APIBaseURL, $config.APICheckoutAccount, $RequestType)
+                $Method = "PUT"
+                $ContentType = "application/json"
+                $clientID = $config.clientID
+                $clientSecret = $config.clientSecret
+                $FacilityCode = $WorkListItem.
+
+                $params = @{
+                    Uri         = $EndPoint
+                    Method      = $Method
+                    ContentType = $ContentType
+                    Headers     = @{ 
+                                    'clientId' = "$clientID"  
+                                    'clientSecret' = "$clientSecret"                     
+                                    'Authorization' = "Bearer $token"
+                                    }
+                }
+
+                try{
+                    Write-Log -Level INFO -Message "Calling Checkout Account API" -logfile $LogFileName
+                    $WorkListjson = $null
+                    $CheckOutResponse = Invoke-RestMethod @params -ErrorAction Stop    
+                    $Checkoutjson = $CheckOutResponse | ConvertTo-Json -Depth 10;
+
+                    if ($WorkListjson)
+                    {
+                        Write-Log -Level INFO -Message "Response received from Checkout Account API successfully" -logfile $LogFileName
+                    }
+                }
+                catch{
+            #        Write-Host "StatusCode:" $_.Exception.Response.StatusCode.value__ 
+            #        Write-Host "StatusDescription:" $_.Exception.Response.StatusDescription    
+            #        $_.Exception.Message
+
+                    Write-Log -Level ERROR -Message "Error during Checkout Account API call." -logfile $LogFileName -ErrorAction Stop
+                    Write-Log -Level ERROR -Message $_.Exception.Message -logfile $LogFileName -ErrorAction Stop
+                    Write-Log -Level ERROR -Message $_.ErrorDetails.Message -logfile $LogFileName -ErrorAction Stop
+                    if ($_.Exception.Response.StatusCode.value__ )
+                    {
+                        Write-Log -Level INFO -Message ("StatusCode:" + $_.Exception.Response.StatusCode.value__ ) -logfile $LogFileName -ErrorAction Stop
+                        Write-Log -Level INFO -Message ("StatusCode:" + $_.Exception.Response.StatusDescription) -logfile $LogFileName -ErrorAction Stop
+                    }
+    
+                }
+
+                         [string]$CheckoutAccountSP = -JOIN ("EXEC ", $config.CheckoutAccountSP, "@AccntJSON = ", $Checkoutjson)
+                         Invoke-UdfUpdateQuery -ConnectionString $config.PSDBConnectionString -sqlquery $CheckoutAccountSP | Out-Null
+            }
+        }
+        else
+        {
+           # Write-Host ('No Requests To be Processed')       
+            Write-Log -Level INFO -Message "No Pending accounts to be processed. All accounts have been checked out." -logfile $LogFileName             
+        }
+        
+    }
+    else
+    {
+        Write-Log -Level ERROR -Message $WorkListData.Errors.Exception.Message -logfile $LogFileName -ErrorAction Stop        
+    }
 
 #endregion Checkout Account
+Write-Log -Level INFO -Message "Data ingestion for Charity process completed." -logfile $LogFileName
+Write-Log -Level INFO -Message "End of Bot execution." -logfile $LogFileName

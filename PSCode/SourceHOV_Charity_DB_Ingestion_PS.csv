@@ -1,0 +1,15 @@
+PSDBConnectionString,Data Source=RAVINDARREDDYU\SQLEXPRESS;Integrated Security=SSPI;Initial Catalog=DTO_DB
+ProcessLogFilePath,D:\Testing\LogFiles\
+ProcessName,SHOV_CHARITY
+ShippingMethod,First Class
+RequestTypes,CHRTY|CSUCF
+APIBaseURL,http://iqaapi.hub.r1rcm.local
+APITokenGeneration,/auth/v1/token
+APIGetWorkList,/shared-services/v1/activities/source-hov?requestType=
+APICheckoutAccount,/shared-services/v1/activities/source-hov/checkout
+APIUpdateAccountStatus,/shared-services/v1/activities/source-hov/update-account
+clientId,SOUR6337IQ
+clientSecret,VWPIKJXKL9VAQFD8+5X+UGFRZHCVFLTLW56CBWYLYJA=
+InsertWorkListSP,usp_SHOV_Charity_InsertWorkList
+GetWorkListSP,usp_SHOV_Charity_GettWorkList
+CheckoutAccountSP,usp_SHOV_Charity_CheckAccount
