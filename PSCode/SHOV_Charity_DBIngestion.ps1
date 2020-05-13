@@ -1,4 +1,4 @@
-﻿<#    
+<#    
 .SYNOPSIS       
    Powershell script for Data ingestion for the SourceHOV Charity Process
 .DESCRIPTION
@@ -199,7 +199,7 @@ $params = @{
                     }
 }
     $rToken = Invoke-RestMethod @params 
-    return $rToken.token
+    return $rToken
 
 ####### Token Generation ########
 }
@@ -245,7 +245,7 @@ if ( -not (Test-Path -Path $ProcessLogFilePath -PathType Container) )
     New-Item -ItemType "directory" -Path $ProcessLogFilePath | Out-Null    
 }
 
-$LogFileName = $env:COMPUTERNAME + "_" + $ProcessName + ".csv"
+$LogFileName = $env:COMPUTERNAME + "_" + $Config.ProcessName + ".csv"
 $LogFileName = Join-Path $ProcessLogFilePath $LogFileName
 
 #region Config values validation
@@ -370,7 +370,12 @@ $token = $null
 Write-Log -Level INFO -Message "Calling Token generation API" -logfile $LogFileName
 try
 {
-    $token = Get-udfToken -EndPoint (-join ($config.APIBaseURL, $c.APITokenGeneration)) -clientID $config.clientID -clientSecret $config.clientSecret -ErrorAction Stop
+    $tokenresponse = Get-udfToken -EndPoint (-join ($config.APIBaseURL, $config.APITokenGeneration)) -clientID $config.clientID -clientSecret $config.clientSecret -ErrorAction Stop
+    if ($tokenresponse.token)
+    {
+        Write-Log -Level INFO -Message "Token generated successfully" -logfile $LogFileName        
+    }
+
 }
 catch
 {
@@ -383,7 +388,7 @@ catch
 }
 
 
-foreach ($RequestType in $config.RequestTypes.Split(","))
+foreach ($RequestType in $config.RequestTypes.Split("|"))
 {
 
 
@@ -412,7 +417,18 @@ foreach ($RequestType in $config.RequestTypes.Split(","))
 
         if ($WorkListjson)
         {
-            Write-Log -Level INFO -Message "Response received from Get Worklist API successfully" -logfile $LogFileName
+            Write-Log -Level INFO -Message "Response received from Get Worklist API successfully" -logfile $LogFileName            
+             [string]$InsertWorkListSP = -JOIN ("EXEC ", $config.InsertWorkListSP, " @json = '$WorkListjson'" )
+             $cdata = Invoke-UdfUpdateQuery -ConnectionString $config.PSDBConnectionString -sqlquery $InsertWorkListSP;
+             if ($cdata.Success)
+             {
+                Write-Log -Level INFO -Message "json parsing done successfully" -logfile $LogFileName                            
+             }
+             else
+             {
+                Write-Log -Level ERROR -Message "Error while parsing the json." -logfile $LogFileName -ErrorAction Stop
+                Write-Log -Level ERROR -Message $cdata.Errors.Exception.Message -logfile $LogFileName -ErrorAction Stop
+             }
         }
     }
     catch{
@@ -430,17 +446,19 @@ foreach ($RequestType in $config.RequestTypes.Split(","))
         Write-Log -Level ERROR -Message $_.ErrorDetails.Message -logfile $LogFileName -ErrorAction Stop
     
     }
-
-             [string]$InsertWorkListSP = -JOIN ("EXEC ", $config.InsertWorkListSP, "@json = ", $WorkListjson )
-             Invoke-UdfUpdateQuery -ConnectionString $config.PSDBConnectionString -sqlquery $InsertWorkListSP | Out-Null
 }
 #endregion Code for GetWorkList
 
 #region Checkout Account
 Write-Log -Level INFO -Message "Calling Token generation API" -logfile $LogFileName
+$token = $null
 try
 {
-    $token = Get-udfToken -EndPoint (-join ($config.APIBaseURL, $c.APITokenGeneration)) -clientID $config.clientID -clientSecret $config.clientSecret -ErrorAction Stop
+    $token = Get-udfToken -EndPoint (-join ($config.APIBaseURL, $config.APITokenGeneration)) -clientID $config.clientID -clientSecret $config.clientSecret -ErrorAction Stop
+    if ($token)
+    {
+        Write-Log -Level INFO -Message "Token generated successfully" -logfile $LogFileName        
+    }
 }
 catch
 {
@@ -453,7 +471,7 @@ catch
 }
 
 
-    [string]$GetWorkListSP = -JOIN ("EXEC ", $config.GetWorkListSP, "@json = ", $WorkListjson )
+    [string]$GetWorkListSP = -JOIN ("EXEC ", $config.GetWorkListSP)
     $WorkListData = Invoke-UdfSQLQuery -ConnectionString $config.PSDBConnectionString -sqlquery $GetWorkListSP; 
 
     if($WorkListData.Success -eq $true)
@@ -464,6 +482,7 @@ catch
             foreach ($WorkListItem in $WorkListData.DataSet.Tables[0].Rows)
             {
             $AccountNo = $WorkListItem.AccountNo
+            $Wid = $WorkListItem.WorklistID.ToString()
             $reqType = $WorkListItem.RequestType
                 $jsonbody = @"
 {
@@ -482,53 +501,64 @@ catch
 }
 "@
                 
-                $EndPoint = -join ($config.APIBaseURL, $config.APICheckoutAccount, $RequestType)
+                $EndPoint = -join ($config.APIBaseURL, $config.APICheckoutAccount)
                 $Method = "PUT"
                 $ContentType = "application/json"
                 $clientID = $config.clientID
                 $clientSecret = $config.clientSecret
-                $FacilityCode = $WorkListItem.
+                $FacilityCode = $WorkListItem.FacilityCode
 
                 $params = @{
                     Uri         = $EndPoint
                     Method      = $Method
                     ContentType = $ContentType
                     Headers     = @{ 
-                                    'clientId' = "$clientID"  
-                                    'clientSecret' = "$clientSecret"                     
+                                    'facilityCode' = "$FacilityCode"                   
                                     'Authorization' = "Bearer $token"
                                     }
+                    Body        = $jsonbody
                 }
 
                 try{
-                    Write-Log -Level INFO -Message "Calling Checkout Account API" -logfile $LogFileName
-                    $WorkListjson = $null
+                    Write-Log -Level INFO -Message "Calling Checkout Account API for worklist ID: $Wid and FacilityCode: $FacilityCode" -logfile $LogFileName
+                    #Write-Log -Level INFO -Message $jsonbody -logfile $LogFileName
+                    
+                    $Checkoutjson = $null
                     $CheckOutResponse = Invoke-RestMethod @params -ErrorAction Stop    
                     $Checkoutjson = $CheckOutResponse | ConvertTo-Json -Depth 10;
 
-                    if ($WorkListjson)
+                    if ($Checkoutjson)
                     {
-                        Write-Log -Level INFO -Message "Response received from Checkout Account API successfully" -logfile $LogFileName
+                        Write-Log -Level INFO -Message "Response received from Checkout Account API successfully for worklist ID: $Wid and FacilityCode: $FacilityCode" -logfile $LogFileName
+
+                        [string]$CheckoutAccountSP = -JOIN ("EXEC ", $config.CheckoutAccountSP, " @AccntJSON = '$Checkoutjson'" )
+                        $checkoutdata = Invoke-UdfUpdateQuery -ConnectionString $config.PSDBConnectionString -sqlquery $CheckoutAccountSP 
+                        if ($checkoutdata.Success)
+                        {
+                            Write-Log -Level INFO -Message "json parsing done successfully for worklist ID: $Wid and FacilityCode: $FacilityCode" -logfile $LogFileName                            
+                        }
+                        else
+                        {
+                            Write-Log -Level ERROR -Message "Error while parsing the json for worklist ID: $Wid and FacilityCode: $FacilityCode" -logfile $LogFileName -ErrorAction Stop
+                            Write-Log -Level ERROR -Message $checkoutdata.Errors.Exception.Message -logfile $LogFileName -ErrorAction Stop
+                        }
                     }
                 }
                 catch{
-            #        Write-Host "StatusCode:" $_.Exception.Response.StatusCode.value__ 
-            #        Write-Host "StatusDescription:" $_.Exception.Response.StatusDescription    
-            #        $_.Exception.Message
-
-                    Write-Log -Level ERROR -Message "Error during Checkout Account API call." -logfile $LogFileName -ErrorAction Stop
+                    Write-Log -Level ERROR -Message "Error during Checkout Account API call for worklist ID: $Wid and FacilityCode: $FacilityCode" -logfile $LogFileName -ErrorAction Stop
                     Write-Log -Level ERROR -Message $_.Exception.Message -logfile $LogFileName -ErrorAction Stop
-                    Write-Log -Level ERROR -Message $_.ErrorDetails.Message -logfile $LogFileName -ErrorAction Stop
-                    if ($_.Exception.Response.StatusCode.value__ )
+                    if ($_.ErrorDetails.Message)
                     {
-                        Write-Log -Level INFO -Message ("StatusCode:" + $_.Exception.Response.StatusCode.value__ ) -logfile $LogFileName -ErrorAction Stop
-                        Write-Log -Level INFO -Message ("StatusCode:" + $_.Exception.Response.StatusDescription) -logfile $LogFileName -ErrorAction Stop
+                        Write-Log -Level ERROR -Message $_.ErrorDetails.Message -logfile $LogFileName -ErrorAction Stop
                     }
+                    #if ($_.Exception.Response.StatusCode.value__ )
+                    #{
+                    #    Write-Log -Level INFO -Message ("StatusCode:" + $_.Exception.Response.StatusCode.value__ ) -logfile $LogFileName -ErrorAction Stop
+                    #    Write-Log -Level INFO -Message ("StatusCode:" + $_.Exception.Response.StatusDescription) -logfile $LogFileName -ErrorAction Stop
+                    #}
+                    #$_
     
                 }
-
-                         [string]$CheckoutAccountSP = -JOIN ("EXEC ", $config.CheckoutAccountSP, "@AccntJSON = ", $Checkoutjson)
-                         Invoke-UdfUpdateQuery -ConnectionString $config.PSDBConnectionString -sqlquery $CheckoutAccountSP | Out-Null
             }
         }
         else
@@ -546,3 +576,4 @@ catch
 #endregion Checkout Account
 Write-Log -Level INFO -Message "Data ingestion for Charity process completed." -logfile $LogFileName
 Write-Log -Level INFO -Message "End of Bot execution." -logfile $LogFileName
+Write-Host "End of Bot Execution."
